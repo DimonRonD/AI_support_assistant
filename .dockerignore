@@ -1,0 +1,12 @@
+.git
+.gitignore
+venv
+__pycache__
+*.pyc
+.env
+data
+*.db
+*.sqlite
+.cursor
+agent-transcripts
+terminals

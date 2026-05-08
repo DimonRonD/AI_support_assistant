@@ -61,6 +61,80 @@ class SqliteStorage:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dialogues (
+                    session_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    controlled_by TEXT NOT NULL DEFAULT 'ai',
+                    rating INTEGER,
+                    comment TEXT,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now')),
+                    closed_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dialogue_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS themes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS synonyms (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    canonical TEXT NOT NULL,
+                    synonym TEXT NOT NULL,
+                    UNIQUE(canonical, synonym)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_users (
+                    email TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    email TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    last_auth_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
 
     def add_memory(self, session_id: str, role: str, content: str) -> None:
         with self._conn() as conn:
@@ -191,3 +265,230 @@ class SqliteStorage:
     def clear_rag_files(self) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM rag_files")
+
+    def ensure_dialogue(self, session_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO dialogues(session_id) VALUES (?)
+                ON CONFLICT(session_id) DO NOTHING
+                """,
+                (session_id,),
+            )
+
+    def append_dialogue_message(self, session_id: str, actor: str, content: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO dialogue_messages(session_id, actor, content)
+                VALUES (?, ?, ?)
+                """,
+                (session_id, actor, content),
+            )
+            conn.execute(
+                "UPDATE dialogues SET updated_at = datetime('now') WHERE session_id = ?",
+                (session_id,),
+            )
+
+    def set_controller(self, session_id: str, controlled_by: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE dialogues
+                SET controlled_by = ?, updated_at = datetime('now')
+                WHERE session_id = ?
+                """,
+                (controlled_by, session_id),
+            )
+
+    def get_dialogue(self, session_id: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, status, controlled_by, rating, comment, created_at, updated_at, closed_at
+                FROM dialogues
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def close_dialogue(self, session_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE dialogues
+                SET status = 'closed',
+                    controlled_by = 'support',
+                    closed_at = datetime('now'),
+                    updated_at = datetime('now')
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            )
+
+    def set_rating(self, session_id: str, rating: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE dialogues
+                SET rating = ?, updated_at = datetime('now')
+                WHERE session_id = ?
+                """,
+                (rating, session_id),
+            )
+
+    def set_comment(self, session_id: str, comment: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE dialogues
+                SET comment = ?, updated_at = datetime('now')
+                WHERE session_id = ?
+                """,
+                (comment, session_id),
+            )
+
+    def list_active_dialogues(self) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, status, controlled_by, rating, comment, created_at, updated_at, closed_at
+                FROM dialogues
+                ORDER BY datetime(updated_at) DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_dialogue_messages(self, session_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT actor, content, created_at
+                FROM dialogue_messages
+                WHERE session_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def list_themes(self) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT name FROM themes ORDER BY name ASC").fetchall()
+        return [row["name"] for row in rows]
+
+    def add_theme(self, name: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO themes(name) VALUES (?)",
+                (name,),
+            )
+
+    def remove_theme(self, name: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM themes WHERE name = ?", (name,))
+        return cur.rowcount
+
+    def clear_themes(self) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM themes")
+
+    def list_synonyms(self) -> dict[str, list[str]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT canonical, synonym FROM synonyms ORDER BY canonical ASC, synonym ASC"
+            ).fetchall()
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(row["canonical"], []).append(row["synonym"])
+        return result
+
+    def add_synonym(self, canonical: str, synonym: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO synonyms(canonical, synonym) VALUES (?, ?)",
+                (canonical, synonym),
+            )
+
+    def remove_synonym_group(self, canonical: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM synonyms WHERE canonical = ?", (canonical,))
+        return cur.rowcount
+
+    def clear_synonyms(self) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM synonyms")
+
+    def auth_user(self, session_id: str, name: str, email: str) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_users(email, name) VALUES (?, ?)
+                ON CONFLICT(email) DO UPDATE SET
+                    name = excluded.name,
+                    updated_at = datetime('now')
+                """,
+                (email, name),
+            )
+            conn.execute(
+                """
+                INSERT INTO api_sessions(session_id, email, name) VALUES (?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    email = excluded.email,
+                    name = excluded.name,
+                    last_auth_at = datetime('now')
+                """,
+                (session_id, email, name),
+            )
+            conn.execute(
+                "INSERT INTO auth_logs(session_id, email, name) VALUES (?, ?, ?)",
+                (session_id, email, name),
+            )
+
+    def is_authorized_session(self, session_id: str) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM api_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return row is not None
+
+    def get_previous_session(self, session_id: str) -> str | None:
+        with self._conn() as conn:
+            current = conn.execute(
+                "SELECT email FROM api_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if current is None:
+                return None
+            row = conn.execute(
+                """
+                SELECT session_id
+                FROM api_sessions
+                WHERE email = ? AND session_id != ?
+                ORDER BY datetime(last_auth_at) DESC
+                LIMIT 1
+                """,
+                (current["email"], session_id),
+            ).fetchone()
+        return row["session_id"] if row else None
+
+    def clear_session_history(self, session_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM memories WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM dialogue_messages WHERE session_id = ?", (session_id,))
+            conn.execute(
+                """
+                UPDATE dialogues
+                SET status = 'active',
+                    controlled_by = 'ai',
+                    rating = NULL,
+                    comment = NULL,
+                    closed_at = NULL,
+                    updated_at = datetime('now')
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            )
