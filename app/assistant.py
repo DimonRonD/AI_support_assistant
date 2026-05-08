@@ -226,8 +226,12 @@ class AssistantService:
         controller = "support" if enabled else "ai"
         self.storage.set_controller(session_id, controller)
         if enabled:
-            return f"Диалог {session_id} передан сотруднику поддержки."
-        return f"Диалог {session_id} возвращен AI-ассистенту."
+            text = f"Диалог {session_id} передан сотруднику поддержки."
+            self.storage.append_dialogue_message(session_id, "support", text)
+            return text
+        text = f"Диалог {session_id} возвращен AI-ассистенту."
+        self.storage.append_dialogue_message(session_id, "support", text)
+        return text
 
     def close_dialogue(self, session_id: str) -> str:
         self.storage.ensure_dialogue(session_id)
