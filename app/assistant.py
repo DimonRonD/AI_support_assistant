@@ -232,10 +232,13 @@ class AssistantService:
     def close_dialogue(self, session_id: str) -> str:
         self.storage.ensure_dialogue(session_id)
         self.storage.close_dialogue(session_id)
-        return (
+        close_text = (
             "Диалог завершен. Пожалуйста, поставьте оценку от 1 до 5: /rate <1-5>. "
             "После этого можно оставить комментарий: /comment <текст>."
         )
+        # For web/API clients we persist a support message so UI can show closure immediately.
+        self.storage.append_dialogue_message(session_id, "support", close_text)
+        return close_text
 
     def set_rating(self, session_id: str, rating: int) -> str:
         self.storage.ensure_dialogue(session_id)
@@ -269,6 +272,7 @@ class AssistantService:
     def support_inbox(self, session_id: str, after_id: int = 0) -> dict[str, object]:
         self.storage.ensure_dialogue(session_id)
         messages = self.storage.get_support_messages(session_id, after_id=after_id)
+        dialog = self.storage.get_dialogue(session_id) or {}
         last_id = after_id
         if messages:
             last_id = int(messages[-1]["id"])
@@ -276,6 +280,7 @@ class AssistantService:
             "session_id": session_id,
             "after_id": after_id,
             "last_id": last_id,
+            "dialog_closed": dialog.get("status") == "closed",
             "messages": messages,
         }
 

@@ -211,6 +211,7 @@ Response example:
   "session_id": "web-6f58927ca7464bc5",
   "after_id": 0,
   "last_id": 142,
+  "dialog_closed": true,
   "messages": [
     {
       "id": 141,
