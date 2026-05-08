@@ -71,7 +71,8 @@ class AssistantService:
             "POST /text - запрос к ассистенту\n"
             "POST /rate - установить оценку 1..5\n"
             "POST /comment - сохранить комментарий (только после оценки)\n"
-            "GET /dialog/{session_id} - данные диалога и сообщения"
+            "GET /dialog/{session_id} - данные диалога и сообщения\n"
+            "GET /support/inbox/{session_id}?after_id=N - новые ответы оператора"
         )
 
     def authorize_api_user(self, session_id: str, name: str, email: str) -> dict[str, object]:
@@ -264,6 +265,19 @@ class AssistantService:
 
     def list_dialogues(self) -> list[dict[str, object]]:
         return self.storage.list_active_dialogues()
+
+    def support_inbox(self, session_id: str, after_id: int = 0) -> dict[str, object]:
+        self.storage.ensure_dialogue(session_id)
+        messages = self.storage.get_support_messages(session_id, after_id=after_id)
+        last_id = after_id
+        if messages:
+            last_id = int(messages[-1]["id"])
+        return {
+            "session_id": session_id,
+            "after_id": after_id,
+            "last_id": last_id,
+            "messages": messages,
+        }
 
     def _generate_answer(
         self, query: str, memories: list[dict[str, str]], rag_context: list[str]

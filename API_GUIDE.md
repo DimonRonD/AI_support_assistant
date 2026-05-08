@@ -8,6 +8,7 @@ API scope:
 - authorize user with name and email;
 - send user messages to assistant;
 - receive assistant response;
+- retrieve manual support replies for web clients;
 - send final rating;
 - send optional comment (only after rating);
 - request dialogue state and message history.
@@ -197,6 +198,36 @@ Response example:
 }
 ```
 
+### `GET /support/inbox/{session_id}?after_id=N`
+Return support-operator replies for web/API users.
+
+Use case:
+- support operator sends `/reply <session_id> <text>` in Telegram support chat;
+- web client polls this endpoint and displays new support messages.
+
+Response example:
+```json
+{
+  "session_id": "web-6f58927ca7464bc5",
+  "after_id": 0,
+  "last_id": 142,
+  "messages": [
+    {
+      "id": 141,
+      "actor": "support",
+      "content": "Добрый день! Подключился оператор поддержки.",
+      "created_at": "2026-05-08 16:12:02"
+    },
+    {
+      "id": 142,
+      "actor": "support",
+      "content": "Уточните, пожалуйста, номер заказа.",
+      "created_at": "2026-05-08 16:12:20"
+    }
+  ]
+}
+```
+
 ## 5) Error Handling
 
 ### HTTP status codes used
@@ -295,4 +326,9 @@ curl -X POST "http://localhost:8000/comment" ^
 ### Fetch dialogue snapshot
 ```bash
 curl -X GET "http://localhost:8000/dialog/crm-user-00042"
+```
+
+### Fetch support replies for web user
+```bash
+curl -X GET "http://localhost:8000/support/inbox/web-6f58927ca7464bc5?after_id=0"
 ```

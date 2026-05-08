@@ -364,7 +364,7 @@ class SqliteStorage:
         with self._conn() as conn:
             rows = conn.execute(
                 """
-                SELECT actor, content, created_at
+                SELECT id, actor, content, created_at
                 FROM dialogue_messages
                 WHERE session_id = ?
                 ORDER BY id DESC
@@ -373,6 +373,21 @@ class SqliteStorage:
                 (session_id, limit),
             ).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+    def get_support_messages(self, session_id: str, after_id: int = 0) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, actor, content, created_at
+                FROM dialogue_messages
+                WHERE session_id = ?
+                  AND actor = 'support'
+                  AND id > ?
+                ORDER BY id ASC
+                """,
+                (session_id, after_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_themes(self) -> list[str]:
         with self._conn() as conn:

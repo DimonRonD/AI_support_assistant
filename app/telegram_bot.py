@@ -155,9 +155,20 @@ async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     sid = context.args[0]
     close_message = service.close_dialogue(sid)
+    delivered = False
     if APP_REF is not None:
-        await APP_REF.bot.send_message(chat_id=int(sid), text=close_message)
-    await _send_text(update, f"Диалог {sid} завершен, пользователю отправлен запрос оценки.")
+        try:
+            await APP_REF.bot.send_message(chat_id=int(sid), text=close_message)
+            delivered = True
+        except ValueError:
+            delivered = False
+    if delivered:
+        await _send_text(update, f"Диалог {sid} завершен, пользователю отправлен запрос оценки.")
+    else:
+        await _send_text(
+            update,
+            f"Диалог {sid} завершен. Для API-пользователя запрос оценки должен показать веб-клиент.",
+        )
 
 
 async def cmd_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -169,10 +180,21 @@ async def cmd_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     sid = context.args[0]
     text = " ".join(context.args[1:])
-    if APP_REF is not None:
-        await APP_REF.bot.send_message(chat_id=int(sid), text=text)
     service.add_support_message(sid, text)
-    await _send_text(update, f"Ответ отправлен в диалог {sid}.")
+    delivered = False
+    if APP_REF is not None:
+        try:
+            await APP_REF.bot.send_message(chat_id=int(sid), text=text)
+            delivered = True
+        except ValueError:
+            delivered = False
+    if delivered:
+        await _send_text(update, f"Ответ отправлен в диалог {sid}.")
+    else:
+        await _send_text(
+            update,
+            f"Ответ сохранен для API-пользователя {sid}. Заберите его через GET /support/inbox/{sid}.",
+        )
 
 
 async def cmd_rate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

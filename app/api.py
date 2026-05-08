@@ -32,6 +32,15 @@ class CommentRequest(BaseModel):
     comment: str
 
 
+@app.get("/")
+def api_root() -> dict[str, str]:
+    return {
+        "message": "AI Assistant API is running.",
+        "help": "/help",
+        "docs": "/docs",
+    }
+
+
 @app.get("/help")
 def api_help() -> dict[str, str]:
     return {"message": service.api_help_text()}
@@ -86,3 +95,12 @@ def api_dialog(session_id: str) -> dict[str, object]:
     if not service.is_authorized(session_id):
         raise HTTPException(status_code=401, detail="Сессия не авторизована.")
     return service.dialog_snapshot(session_id)
+
+
+@app.get("/support/inbox/{session_id}")
+def api_support_inbox(session_id: str, after_id: int = 0) -> dict[str, object]:
+    if not service.is_authorized(session_id):
+        raise HTTPException(status_code=401, detail="Сессия не авторизована.")
+    if after_id < 0:
+        raise HTTPException(status_code=400, detail="after_id должен быть >= 0.")
+    return service.support_inbox(session_id, after_id=after_id)
