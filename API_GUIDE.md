@@ -1,197 +1,298 @@
-# API Guide
+# API Guide for Integrators
 
-## 1. Base info
+## 1) Purpose and Scope
 
-- Framework: FastAPI
-- Base URL (local): `http://localhost:8000`
-- Content type: `application/json` for JSON endpoints
-- RAG file upload endpoint uses `multipart/form-data`
+This document describes how an external application integrates with the assistant API.
 
-Run API:
+API scope:
+- authorize user with name and email;
+- send user messages to assistant;
+- receive assistant response;
+- send final rating;
+- send optional comment (only after rating);
+- request dialogue state and message history.
 
-```bash
-python run_api.py
-```
+Out of scope for this API:
+- RAG source file management;
+- cache administration;
+- memory reset commands.
 
-Swagger UI:
+## 2) Connection Basics
 
-- [http://localhost:8000/docs](http://localhost:8000/docs)
+- Transport: HTTP/HTTPS
+- Payload format: `application/json`
+- Base URL (example): `http://localhost:8000`
+- OpenAPI/Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Authentication: not enabled in current version
 
-## 2. Environment setup
+## 3) User Journey
 
-1. Copy `.env.example` to `.env`
-2. Set values:
-   - `OPENAI_API_KEY`
-   - `OPENAI_MODEL` (for example `gpt-5-nano-2025-08-07`)
-   - `TELEGRAM_BOT_TOKEN` (for Telegram bot)
-   - storage paths if needed
+### Stage A: Start or continue dialogue
+1. Your app creates or reuses a stable `session_id` for end user.
+2. Your app calls `POST /auth` with `name`, `email`, `session_id`.
+3. API returns auth status and previous dialogue history (if found).
+4. Your app asks user if previous history should be continued.
+5. If user wants clean context, app sends message `очистить историю` to `POST /text`.
+6. Then your app continues normal flow with `POST /text`.
 
-## 3. Endpoint list
+### Stage B: Handle support takeover/closed dialogue states
+When calling `POST /text`:
+- if dialogue is controlled by support, API returns waiting message;
+- if dialogue is closed, API returns rating prompt.
+
+### Stage C: Finish dialogue and collect feedback
+1. Your app sends rating `1..5` to `POST /rate`.
+2. If user wants to add details, your app sends text to `POST /comment`.
+3. To display full transcript and final state, your app calls `GET /dialog/{session_id}`.
+
+## 4) Endpoints
 
 ### `GET /help`
+Returns textual list of API commands.
 
-Returns command list.
-
-Response:
-
+Response example:
 ```json
 {
-  "message": "..."
+  "message": "API команды: ..."
 }
 ```
 
-### `POST /rag_add`
-
-Upload TXT/PDF/MD file into `/rag_source`.
-
-- Body: `multipart/form-data`
-- Field: `file`
-
-Response:
-
-```json
-{
-  "message": "Файл <name> загружен в /rag_source."
-}
-```
-
-### `GET /rag_source`
-
-List source files and RAG status (`чанков N` or `Файл не загружен в базу RAG`).
-
-### `POST /rag_clear`
-
-Delete a file from `/rag_source` and remove its chunks from RAG.
+### `POST /auth`
+Authorize user before any dialogue operations.
 
 Request:
-
 ```json
 {
-  "filename": "manual.pdf"
+  "session_id": "crm-user-00042",
+  "name": "Ivan Petrov",
+  "email": "ivan.petrov@example.com"
 }
 ```
 
-### `POST /rag_detail`
-
-Return chunks for file.
-
-Request:
-
+Response:
 ```json
 {
-  "filename": "manual.pdf"
+  "message": "Авторизация выполнена.",
+  "has_previous_history": true,
+  "history": [
+    {
+      "actor": "user",
+      "content": "Здравствуйте",
+      "created_at": "2026-05-08 10:01:05"
+    },
+    {
+      "actor": "ai",
+      "content": "Здравствуйте! Чем могу помочь?",
+      "created_at": "2026-05-08 10:01:06"
+    }
+  ]
 }
 ```
 
-### `POST /rag_load`
-
-Load only files that are not loaded into RAG yet.
-
-### `POST /rag_reload`
-
-Clear RAG completely, then rebuild from all files in `/rag_source`.
+Notes:
+- all auth attempts are stored in auth logs (`session_id`, `name`, `email`, timestamp);
+- session becomes allowed for `/text`, `/rate`, `/comment`, `/dialog/{session_id}`.
 
 ### `POST /text`
-
-Main assistant endpoint (chat mode), with memory + cache + RAG context.
+Send one user message to assistant.
 
 Request:
-
 ```json
 {
-  "session_id": "user-123",
-  "query": "Как оформить возврат?"
+  "session_id": "crm-user-00042",
+  "query": "Как восстановить пароль?"
 }
 ```
 
 Response:
-
 ```json
 {
-  "answer": "Текст ответа",
+  "answer": "Текст ответа ассистента",
   "from_cache": false
 }
 ```
 
-### `POST /mode_text/{session_id}`
+Notes:
+- memory of last 5 messages is included in context;
+- RAG context is included in generation;
+- answer may be returned from cache;
+- dialogue messages are logged with actor marker (`user`/`ai`/`support`).
+- if payload query is exactly `очистить историю`, current session history is cleared.
 
-Set session mode to text.
+### `POST /rate`
+Save final dialogue rating.
 
-### `POST /clear/{session_id}`
-
-Clear memory for session.
-
-### `POST /clear_cache`
-
-Without params:
-- deletes entries where hit count is only first request (`hit_count <= 1`)
-- and create date is older than 3 months
-
-With params:
-
+Request:
 ```json
 {
-  "n": 3,
-  "date": "2026-01-01"
+  "session_id": "crm-user-00042",
+  "rating": 5
 }
 ```
 
-Deletes records where:
-- `hit_count < n`
-- `created_at < date`
-
-### `GET /cache_view`
-
-Returns cache as text table with fields:
-- дата создания
-- количество совпадений
-- запрос
-- ответ
-
-## 4. Request examples
-
-### Ask assistant
-
-```bash
-curl -X POST "http://localhost:8000/text" \
-  -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"demo\",\"query\":\"Как восстановить пароль?\"}"
+Response:
+```json
+{
+  "message": "Оценка сохранена. При желании добавьте комментарий: /comment <текст>."
+}
 ```
 
-### Upload RAG file
+Validation:
+- `rating` must be integer in range `1..5`.
 
-```bash
-curl -X POST "http://localhost:8000/rag_add" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@faq.md"
+### `POST /comment`
+Save optional comment for dialogue feedback.
+
+Request:
+```json
+{
+  "session_id": "crm-user-00042",
+  "comment": "Вопрос решился быстро."
+}
 ```
 
-### Reload all RAG data
-
-```bash
-curl -X POST "http://localhost:8000/rag_reload"
+Response:
+```json
+{
+  "message": "Комментарий сохранен. Спасибо за обратную связь."
+}
 ```
 
-## 5. Telegram parity
+Validation:
+- comment is accepted only after rating was set.
 
-All business operations available in Telegram commands are mirrored in API:
+### `GET /dialog/{session_id}`
+Return dialogue metadata and message timeline.
 
-- `/help` -> `GET /help`
-- `/rag_add` -> `POST /rag_add`
-- `/rag_source` -> `GET /rag_source`
-- `/rag_clear` -> `POST /rag_clear`
-- `/rag_detail` -> `POST /rag_detail`
-- `/rag_load` -> `POST /rag_load`
-- `/rag_reload` -> `POST /rag_reload`
-- `/text` -> `POST /text`
-- `/clear` -> `POST /clear/{session_id}`
-- `/clear_cache` -> `POST /clear_cache`
-- `/cache_view` -> `GET /cache_view`
+Response example:
+```json
+{
+  "dialog": {
+    "session_id": "crm-user-00042",
+    "status": "closed",
+    "controlled_by": "support",
+    "rating": 5,
+    "comment": "Спасибо",
+    "created_at": "2026-05-08 10:01:00",
+    "updated_at": "2026-05-08 10:20:00",
+    "closed_at": "2026-05-08 10:19:00"
+  },
+  "messages": [
+    {
+      "actor": "user",
+      "content": "Здравствуйте",
+      "created_at": "2026-05-08 10:01:05"
+    },
+    {
+      "actor": "ai",
+      "content": "Здравствуйте! Чем могу помочь?",
+      "created_at": "2026-05-08 10:01:06"
+    },
+    {
+      "actor": "support",
+      "content": "Подключился оператор, уточните номер заказа.",
+      "created_at": "2026-05-08 10:05:12"
+    }
+  ]
+}
+```
 
-## 6. Notes on internals
+## 5) Error Handling
 
-- RAG vector store: ChromaDB (`CHROMA_PATH`)
-- Source docs folder: `RAG_SOURCE_DIR` (default `./rag_source`)
-- Memory and cache DB: SQLite (`SQLITE_PATH`)
-- Memory window: 5 last messages per session
-- Telegram message split limit: configurable with `MAX_TELEGRAM_MESSAGE_LENGTH` (default 4000)
+### HTTP status codes used
+- `200 OK`: successful request
+- `400 Bad Request`: validation/business rule violation
+- `422 Unprocessable Entity`: malformed JSON or missing required fields
+- `500 Internal Server Error`: unexpected server-side failure
+
+### Common API error cases
+
+1) `POST /rate` with invalid range
+```json
+{
+  "detail": "rating должен быть от 1 до 5."
+}
+```
+
+2) `POST /comment` before rating
+```json
+{
+  "detail": "Сначала установите оценку командой /rate <1-5>."
+}
+```
+
+3) Invalid payload type (example: string instead of integer)
+- FastAPI returns `422` with field-level validation details.
+
+4) Access endpoints without auth
+```json
+{
+  "detail": "Сначала выполните авторизацию через POST /auth (name, email, session_id)."
+}
+```
+
+### Integrator recommendations
+- Retry only on transient failures (`5xx`, network timeouts).
+- Do not retry `4xx` blindly; fix request data first.
+- Log request id/session id and endpoint for observability.
+
+## 6) Best Practices for `session_id`
+
+### Required properties
+- stable for one end user dialogue context;
+- unique across your integration;
+- deterministic and reproducible from your user source id.
+
+### Recommended format
+- prefix by source system + unique user key, for example:
+  - `crm-user-00042`
+  - `tg-67382910`
+  - `web-9f3a2c18`
+
+### Practical rules
+- use one `session_id` per user conversation thread;
+- do not reuse `session_id` for different users;
+- store mapping in your system (`external_user_id -> session_id`);
+- avoid PII directly in `session_id` (email/phone in plain text).
+
+## 7) Integration Examples (`curl`)
+
+### Send user message
+```bash
+curl -X POST "http://localhost:8000/text" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"session_id\":\"crm-user-00042\",\"query\":\"Какие сроки возврата?\"}"
+```
+
+### Authorize user
+```bash
+curl -X POST "http://localhost:8000/auth" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"session_id\":\"crm-user-00042\",\"name\":\"Ivan Petrov\",\"email\":\"ivan.petrov@example.com\"}"
+```
+
+### Clear dialogue history
+```bash
+curl -X POST "http://localhost:8000/text" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"session_id\":\"crm-user-00042\",\"query\":\"очистить историю\"}"
+```
+
+### Set rating
+```bash
+curl -X POST "http://localhost:8000/rate" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"session_id\":\"crm-user-00042\",\"rating\":4}"
+```
+
+### Send comment
+```bash
+curl -X POST "http://localhost:8000/comment" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"session_id\":\"crm-user-00042\",\"comment\":\"Все понятно\"}"
+```
+
+### Fetch dialogue snapshot
+```bash
+curl -X GET "http://localhost:8000/dialog/crm-user-00042"
+```

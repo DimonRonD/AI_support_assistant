@@ -13,6 +13,7 @@ class Settings:
     openai_model: str
     embedding_model: str
     telegram_bot_token: str
+    telegram_support_chat_id: str
     sqlite_path: Path
     chroma_path: Path
     rag_source_dir: Path
@@ -34,6 +35,7 @@ def load_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5-nano-2025-08-07"),
         embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        telegram_support_chat_id=os.getenv("TELEGRAM_SUPPORT_CHAT_ID", ""),
         sqlite_path=sqlite_path,
         chroma_path=chroma_path,
         rag_source_dir=rag_source_dir,

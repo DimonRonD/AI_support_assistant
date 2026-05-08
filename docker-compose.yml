@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_assistant_api
+    profiles: ["api-only", "full"]
+    command: python run_api.py
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./rag_source:/app/rag_source
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/help', timeout=3)"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_assistant_bot
+    profiles: ["full"]
+    command: python run_bot.py
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./rag_source:/app/rag_source
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy

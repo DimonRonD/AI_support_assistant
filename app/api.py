@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.assistant import AssistantService
@@ -18,79 +16,73 @@ class AskRequest(BaseModel):
     query: str
 
 
-class CacheClearRequest(BaseModel):
-    n: int | None = None
-    date: str | None = None
+class AuthRequest(BaseModel):
+    session_id: str
+    name: str
+    email: str
 
 
-class FilenameRequest(BaseModel):
-    filename: str
+class RateRequest(BaseModel):
+    session_id: str
+    rating: int
+
+
+class CommentRequest(BaseModel):
+    session_id: str
+    comment: str
 
 
 @app.get("/help")
 def api_help() -> dict[str, str]:
-    return {"message": service.help_text()}
+    return {"message": service.api_help_text()}
 
 
-@app.post("/rag_add")
-async def api_rag_add(file: UploadFile = File(...)) -> dict[str, str]:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".txt", ".pdf", ".md"}:
-        raise HTTPException(status_code=400, detail="Поддерживаются только TXT, PDF, MD.")
-    destination = settings.rag_source_dir / (file.filename or "uploaded.txt")
-    content = await file.read()
-    destination.write_bytes(content)
-    return {"message": f"Файл {destination.name} загружен в /rag_source."}
-
-
-@app.get("/rag_source")
-def api_rag_source() -> dict[str, str]:
-    return {"message": service.rag_source()}
-
-
-@app.post("/rag_clear")
-def api_rag_clear(request: FilenameRequest) -> dict[str, str]:
-    return {"message": service.rag_clear(request.filename)}
-
-
-@app.post("/rag_detail")
-def api_rag_detail(request: FilenameRequest) -> dict[str, str]:
-    return {"message": service.rag_detail(request.filename)}
-
-
-@app.post("/rag_load")
-def api_rag_load() -> dict[str, str]:
-    return {"message": service.rag_load()}
-
-
-@app.post("/rag_reload")
-def api_rag_reload() -> dict[str, str]:
-    return {"message": service.rag_reload()}
+@app.post("/auth")
+def api_auth(request: AuthRequest) -> dict[str, object]:
+    if "@" not in request.email:
+        raise HTTPException(status_code=400, detail="Некорректный email.")
+    if not request.name.strip():
+        raise HTTPException(status_code=400, detail="Имя не может быть пустым.")
+    result = service.authorize_api_user(
+        session_id=request.session_id,
+        name=request.name,
+        email=request.email,
+    )
+    return result
 
 
 @app.post("/text")
 def api_text(request: AskRequest) -> dict[str, str | bool]:
+    if not service.is_authorized(request.session_id):
+        raise HTTPException(
+            status_code=401,
+            detail="Сначала выполните авторизацию через POST /auth (name, email, session_id).",
+        )
     result = service.ask(session_id=request.session_id, query=request.query)
     return {"answer": result.text, "from_cache": result.from_cache}
 
 
-@app.post("/mode_text/{session_id}")
-def api_mode_text(session_id: str) -> dict[str, str]:
-    return {"message": service.set_text_mode(session_id)}
+@app.post("/rate")
+def api_rate(request: RateRequest) -> dict[str, str]:
+    if not service.is_authorized(request.session_id):
+        raise HTTPException(status_code=401, detail="Сессия не авторизована.")
+    if request.rating < 1 or request.rating > 5:
+        raise HTTPException(status_code=400, detail="rating должен быть от 1 до 5.")
+    return {"message": service.set_rating(request.session_id, request.rating)}
 
 
-@app.post("/clear/{session_id}")
-def api_clear(session_id: str) -> dict[str, str]:
-    return {"message": service.clear_memory(session_id)}
+@app.post("/comment")
+def api_comment(request: CommentRequest) -> dict[str, str]:
+    if not service.is_authorized(request.session_id):
+        raise HTTPException(status_code=401, detail="Сессия не авторизована.")
+    message = service.set_comment(request.session_id, request.comment)
+    if message.startswith("Сначала установите оценку"):
+        raise HTTPException(status_code=400, detail=message)
+    return {"message": message}
 
 
-@app.post("/clear_cache")
-def api_clear_cache(request: CacheClearRequest) -> dict[str, str]:
-    if (request.n is None) != (request.date is None):
-        raise HTTPException(status_code=400, detail="Передайте либо оба параметра n и date, либо ни одного.")
-    return {"message": service.clear_cache(request.n, request.date)}
-
-
-@app.get("/cache_view")
-def api_cache_view() -> dict[str, str]:
-    return {"message": service.cache_view()}
+@app.get("/dialog/{session_id}")
+def api_dialog(session_id: str) -> dict[str, object]:
+    if not service.is_authorized(session_id):
+        raise HTTPException(status_code=401, detail="Сессия не авторизована.")
+    return service.dialog_snapshot(session_id)
