@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-telegram-bot
+python-dotenv
+openai
+chromadb
+pypdf
+python-multipart
