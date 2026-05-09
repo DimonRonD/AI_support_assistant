@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 import shutil
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from urllib.parse import quote_plus
 from urllib.request import urlopen
@@ -61,7 +63,11 @@ class AssistantService:
             "/take <session_id> - перехватить диалог поддержкой\n"
             "/release <session_id> - вернуть диалог AI\n"
             "/reply <session_id> <текст> - ответить пользователю вручную\n"
-            "/close <session_id> - завершить диалог"
+            "/close <session_id> - завершить диалог\n"
+            "/logs - список дат с логами\n"
+            "/view_log <YYYY-MM-DD> - CSV логов за дату (все сессии)\n"
+            "/view_log <YYYY-MM-DD> <session_id> - CSV логов за дату по одной сессии\n"
+            "/view_log <YYYY-MM-DD> [session_id] --email <email> - CSV логов по email"
         )
 
     def api_help_text(self) -> str:
@@ -287,6 +293,55 @@ class AssistantService:
             "dialog_closed": dialog.get("status") == "closed",
             "messages": messages,
         }
+
+    def logs_dates_text(self) -> str:
+        dates = self.storage.list_log_dates()
+        if not dates:
+            return "Логи не найдены."
+        return "Даты с логами:\n" + "\n".join([f"- {item}" for item in dates])
+
+    def build_log_csv(
+        self,
+        date_value: str,
+        session_id: str | None = None,
+        email: str | None = None,
+    ) -> tuple[str, bytes]:
+        rows = self.storage.get_log_rows_for_date(date_value, session_id=session_id, email=email)
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "Дата",
+                "время",
+                "имя пользователя",
+                "email",
+                "вопрос",
+                "ответ",
+                "оператор",
+                "оценка",
+                "комментарий",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row["msg_date"],
+                    row["msg_time"],
+                    row["user_name"],
+                    row["email"],
+                    row["question"],
+                    row["answer"],
+                    "да" if row["answer_actor"] == "support" else "",
+                    row["rating"],
+                    row["comment"],
+                ]
+            )
+        suffix = f"_{session_id}" if session_id else ""
+        if email:
+            suffix += f"_{email}"
+        safe_suffix = suffix.replace("/", "_").replace("\\", "_").replace(" ", "_")
+        filename = f"logs_{date_value}{safe_suffix}.csv"
+        return filename, output.getvalue().encode("utf-8-sig")
 
     def _generate_answer(
         self, query: str, memories: list[dict[str, str]], rag_context: list[str]

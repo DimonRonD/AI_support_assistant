@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
-from telegram import Update
+from telegram import InputFile, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from app.assistant import AssistantService
@@ -224,6 +226,62 @@ async def cmd_synonimic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _send_text(update, service.synonimic_command(context.args))
 
 
+async def cmd_logs(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_support_chat(update):
+        await _send_text(update, "Команда доступна только сотруднику поддержки.")
+        return
+    await _send_text(update, service.logs_dates_text())
+
+
+async def cmd_view_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_support_chat(update):
+        await _send_text(update, "Команда доступна только сотруднику поддержки.")
+        return
+    if len(context.args) < 1:
+        await _send_text(
+            update,
+            "Формат: /view_log <YYYY-MM-DD> [session_id] [--email <email>]",
+        )
+        return
+    date_value = context.args[0]
+    session_id: str | None = None
+    email: str | None = None
+    idx = 1
+    while idx < len(context.args):
+        token = context.args[idx]
+        if token == "--email":
+            if idx + 1 >= len(context.args):
+                await _send_text(
+                    update,
+                    "Формат: /view_log <YYYY-MM-DD> [session_id] [--email <email>]",
+                )
+                return
+            email = context.args[idx + 1].strip()
+            idx += 2
+            continue
+        if session_id is None:
+            session_id = token
+            idx += 1
+            continue
+        await _send_text(
+            update,
+            "Формат: /view_log <YYYY-MM-DD> [session_id] [--email <email>]",
+        )
+        return
+    try:
+        datetime.strptime(date_value, "%Y-%m-%d")
+    except ValueError:
+        await _send_text(update, "Некорректная дата. Формат: YYYY-MM-DD")
+        return
+
+    filename, payload = service.build_log_csv(date_value, session_id=session_id, email=email)
+    if update.message is None:
+        return
+    bio = BytesIO(payload)
+    bio.seek(0)
+    await update.message.reply_document(document=InputFile(bio, filename=filename))
+
+
 async def text_message(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
     if not message or not message.text:
@@ -270,6 +328,8 @@ def build_bot() -> Application:
     app.add_handler(CommandHandler("comment", cmd_comment))
     app.add_handler(CommandHandler("themes", cmd_themes))
     app.add_handler(CommandHandler("synonimic", cmd_synonimic))
+    app.add_handler(CommandHandler("logs", cmd_logs))
+    app.add_handler(CommandHandler("view_log", cmd_view_log))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
     app.add_handler(MessageHandler(filters.Document.ALL, cmd_rag_add))
     global APP_REF

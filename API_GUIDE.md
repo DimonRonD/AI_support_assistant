@@ -24,7 +24,7 @@ Out of scope for this API:
 - Payload format: `application/json`
 - Base URL (example): `http://localhost:8000`
 - OpenAPI/Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Authentication: not enabled in current version
+- Authentication: required via `POST /auth`
 
 ## 3) User Journey
 
@@ -55,6 +55,18 @@ Response example:
 ```json
 {
   "message": "API команды: ..."
+}
+```
+
+### `GET /`
+Service health/info endpoint.
+
+Response example:
+```json
+{
+  "message": "AI Assistant API is running.",
+  "help": "/help",
+  "docs": "/docs"
 }
 ```
 
@@ -203,6 +215,7 @@ Return support-operator replies for web/API users.
 
 Use case:
 - support operator sends `/reply <session_id> <text>` in Telegram support chat;
+- support operator may send `/take`, `/release`, `/close` and these state changes are also pushed as `support` timeline messages;
 - web client polls this endpoint and displays new support messages.
 
 Response example:

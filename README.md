@@ -150,5 +150,7 @@ curl -X POST "http://localhost:8000/text" ^
 - `/release <session_id>` - возврат диалога AI-ассистенту
 - `/reply <session_id> <текст>` - ручной ответ сотрудника пользователю
 - `/close <session_id>` - завершение диалога сотрудником поддержки
+- `/logs` - список дат, за которые есть логи
+- `/view_log <YYYY-MM-DD> [session_id] [--email <email>]` - выгрузка CSV логов за дату (опционально по сессии и/или email)
 
 Подробности по API: `API_GUIDE.md`.

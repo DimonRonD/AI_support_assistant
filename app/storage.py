@@ -507,3 +507,65 @@ class SqliteStorage:
                 """,
                 (session_id,),
             )
+
+    def list_log_dates(self) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT date(created_at) AS log_date
+                FROM dialogue_messages
+                ORDER BY log_date DESC
+                """
+            ).fetchall()
+        return [row["log_date"] for row in rows if row["log_date"]]
+
+    def get_log_rows_for_date(
+        self,
+        date_value: str,
+        session_id: str | None = None,
+        email: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._conn() as conn:
+            base_query = """
+                SELECT
+                    date(um.created_at) AS msg_date,
+                    time(um.created_at) AS msg_time,
+                    COALESCE(s.name, um.session_id) AS user_name,
+                    COALESCE(s.email, '') AS email,
+                    um.content AS question,
+                    COALESCE((
+                        SELECT dm2.content
+                        FROM dialogue_messages dm2
+                        WHERE dm2.session_id = um.session_id
+                          AND dm2.id > um.id
+                          AND dm2.actor IN ('ai', 'support')
+                        ORDER BY dm2.id ASC
+                        LIMIT 1
+                    ), '') AS answer,
+                    COALESCE((
+                        SELECT dm2.actor
+                        FROM dialogue_messages dm2
+                        WHERE dm2.session_id = um.session_id
+                          AND dm2.id > um.id
+                          AND dm2.actor IN ('ai', 'support')
+                        ORDER BY dm2.id ASC
+                        LIMIT 1
+                    ), '') AS answer_actor,
+                    COALESCE(d.rating, '') AS rating,
+                    COALESCE(d.comment, '') AS comment
+                FROM dialogue_messages um
+                LEFT JOIN api_sessions s ON s.session_id = um.session_id
+                LEFT JOIN dialogues d ON d.session_id = um.session_id
+                WHERE um.actor = 'user'
+                  AND date(um.created_at) = date(?)
+            """
+            params: list[Any] = [date_value]
+            if session_id:
+                base_query += " AND um.session_id = ?"
+                params.append(session_id)
+            if email:
+                base_query += " AND lower(COALESCE(s.email, '')) = lower(?)"
+                params.append(email.strip())
+            base_query += " ORDER BY um.created_at ASC"
+            rows = conn.execute(base_query, params).fetchall()
+        return [dict(row) for row in rows]
